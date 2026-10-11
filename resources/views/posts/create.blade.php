@@ -1,19 +1,13 @@
 @extends('layouts.app')
 
-@section('title', 'Tulis Post Baru')
+@section('title', 'Tulis Artikel')
 
 @section('content')
-    <div class="page-head">
-        <div>
-            <p class="eyebrow">Post baru</p>
-            <h1>Tulis Post</h1>
-        </div>
-        <a href="{{ route('posts.index') }}" class="btn btn--ghost btn--sm">
-            <x-icon name="arrow-left" :size="16" /> Kembali
-        </a>
-    </div>
+    <div class="narrow">
+        <a href="{{ route('posts.index') }}" class="back"><x-icon name="arrow-left" :size="16" /> Kembali ke daftar</a>
 
-    <x-card class="card--form" title="Form Post Baru">
-        @include('posts._form', ['post' => $post, 'action' => route('posts.store')])
-    </x-card>
+        <x-card title="Tulis artikel baru">
+            @include('posts._form', ['submitLabel' => 'Terbitkan'])
+        </x-card>
+    </div>
 @endsection

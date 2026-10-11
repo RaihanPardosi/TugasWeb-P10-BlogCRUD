@@ -1,12 +1,18 @@
-{{-- COMPONENT 2: Card. Pakai: <x-card title="Judul">isi</x-card> --}}
-@props(['title' => null, 'padded' => true])
-<article {{ $attributes->merge(['class' => 'card']) }}>
+@props(['title' => null])
+<article {{ $attributes->class(['card']) }}>
+    @isset($media)
+        <div class="card__media">{{ $media }}</div>
+    @endisset
+
     @if ($title)
-        <header class="card__head"><h2>{{ $title }}</h2></header>
+        <header class="card__head">
+            <h2 class="card__title">{{ $title }}</h2>
+        </header>
     @endif
-    @if ($padded)
-        <div class="card__body">{{ $slot }}</div>
-    @else
-        {{ $slot }}
-    @endif
+
+    <div class="card__body">{{ $slot }}</div>
+
+    @isset($footer)
+        <footer class="card__foot">{{ $footer }}</footer>
+    @endisset
 </article>

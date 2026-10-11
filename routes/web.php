@@ -3,15 +3,15 @@
 use App\Http\Controllers\PostController;
 use Illuminate\Support\Facades\Route;
 
-Route::redirect('/', '/posts');
+Route::get('/', fn () => redirect()->route('posts.index'))->name('home');
 
-// Route tambahan (soft delete) HARUS di atas resource supaya "posts/trash"
-// tidak ketangkap sebagai posts/{post}.
-Route::get('posts/trash', [PostController::class, 'trash'])->name('posts.trash');
+// Rute tambahan untuk soft delete (harus menyertakan data yang sudah di-trash).
 Route::patch('posts/{post}/restore', [PostController::class, 'restore'])
-    ->name('posts.restore')->withTrashed();
-Route::delete('posts/{post}/force', [PostController::class, 'forceDelete'])
-    ->name('posts.force-delete')->withTrashed();
+    ->withTrashed()
+    ->name('posts.restore');
 
-// Menghasilkan 7 named route: posts.index, create, store, show, edit, update, destroy
+Route::delete('posts/{post}/force', [PostController::class, 'forceDelete'])
+    ->withTrashed()
+    ->name('posts.force-delete');
+
 Route::resource('posts', PostController::class);

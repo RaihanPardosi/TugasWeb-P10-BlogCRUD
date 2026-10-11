@@ -5,140 +5,146 @@ namespace App\Http\Controllers;
 use App\Models\Post;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
+use Throwable;
 
 class PostController extends Controller
 {
-    private const PER_PAGE = 6;
-
-    /** Daftar post + pencarian + pagination. */
     public function index(Request $request): View
     {
         $search = trim((string) $request->query('q', ''));
+        $trashed = $request->boolean('trashed');
 
         $posts = Post::query()
-            ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('title', 'like', "%{$search}%")
-                      ->orWhere('author', 'like', "%{$search}%")
-                      ->orWhere('content', 'like', "%{$search}%");
-                });
-            })
-            ->latest()
-            ->paginate(self::PER_PAGE)
-            ->withQueryString(); // supaya ?q= tidak hilang saat pindah halaman
+            ->when($trashed, fn ($query) => $query->onlyTrashed())
+            ->when($search !== '', fn ($query) => $query->search($search))
+            ->latest($trashed ? 'deleted_at' : 'created_at')
+            ->paginate(9)
+            ->onEachSide(1)
+            ->withQueryString();
 
-        return view('posts.index', [
-            'posts'        => $posts,
-            'search'       => $search,
-            'trashedCount' => Post::onlyTrashed()->count(),
-        ]);
+        $counts = [
+            'active' => Post::count(),
+            'trashed' => Post::onlyTrashed()->count(),
+        ];
+
+        return view('posts.index', compact('posts', 'search', 'trashed', 'counts'));
     }
 
-    /** Form tulis post baru. */
     public function create(): View
     {
         return view('posts.create', ['post' => new Post()]);
     }
 
-    /** Simpan post baru. */
     public function store(Request $request): RedirectResponse
     {
-        $data = $request->validate($this->rules(), $this->messages(), $this->attributes());
-        unset($data['image']);
+        $validated = $this->validatePost($request);
+        $data = Arr::only($validated, ['title', 'body']);
+        $path = null;
 
         try {
             if ($request->hasFile('image')) {
-                $data['image'] = $request->file('image')->store('posts', 'public');
+                $path = $request->file('image')->store('posts', 'public');
+                $data['image'] = $path;
             }
+
             $post = Post::create($data);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             report($e);
-            return back()->withInput()->with('error', 'Gagal menyimpan post. Coba lagi sebentar lagi.');
+
+            if ($path) {
+                Storage::disk('public')->delete($path);
+            }
+
+            return back()
+                ->withInput()
+                ->with('error', 'Artikel gagal disimpan. Silakan coba lagi.');
         }
 
-        return redirect()->route('posts.show', $post)
-            ->with('success', "Post \"{$post->title}\" berhasil dipublikasikan.");
+        return redirect()
+            ->route('posts.show', $post)
+            ->with('success', 'Artikel berhasil diterbitkan.');
     }
 
-    /** Detail post (Route Model Binding: {post} otomatis jadi objek Post). */
     public function show(Post $post): View
     {
         return view('posts.show', compact('post'));
     }
 
-    /** Form edit. */
     public function edit(Post $post): View
     {
         return view('posts.edit', compact('post'));
     }
 
-    /** Update post. */
     public function update(Request $request, Post $post): RedirectResponse
     {
-        $data = $request->validate($this->rules(), $this->messages(), $this->attributes());
-        unset($data['image']);
+        $validated = $this->validatePost($request);
+        $data = Arr::only($validated, ['title', 'body']);
+
+        $oldImage = $post->image;
+        $newImage = null;
+        $removeImage = $request->boolean('remove_image');
 
         try {
-            if ($request->boolean('remove_image') && $post->image) {
-                Storage::disk('public')->delete($post->image);
+            if ($request->hasFile('image')) {
+                $newImage = $request->file('image')->store('posts', 'public');
+                $data['image'] = $newImage;
+            } elseif ($removeImage) {
                 $data['image'] = null;
             }
 
-            if ($request->hasFile('image')) {
-                if ($post->image) {
-                    Storage::disk('public')->delete($post->image);
-                }
-                $data['image'] = $request->file('image')->store('posts', 'public');
+            $post->update($data);
+        } catch (Throwable $e) {
+            report($e);
+
+            if ($newImage) {
+                Storage::disk('public')->delete($newImage);
             }
 
-            $post->update($data);
-        } catch (\Throwable $e) {
-            report($e);
-            return back()->withInput()->with('error', 'Gagal memperbarui post. Coba lagi sebentar lagi.');
+            return back()
+                ->withInput()
+                ->with('error', 'Perubahan gagal disimpan. Silakan coba lagi.');
         }
 
-        return redirect()->route('posts.show', $post)
-            ->with('success', 'Post berhasil diperbarui.');
+        if ($oldImage && ($newImage || $removeImage)) {
+            Storage::disk('public')->delete($oldImage);
+        }
+
+        return redirect()
+            ->route('posts.show', $post)
+            ->with('success', 'Perubahan berhasil disimpan.');
     }
 
-    /** Hapus = soft delete (masuk tempat sampah). */
     public function destroy(Post $post): RedirectResponse
     {
         try {
             $post->delete();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             report($e);
-            return back()->with('error', 'Gagal menghapus post.');
+
+            return back()->with('error', 'Artikel gagal dihapus. Silakan coba lagi.');
         }
 
-        return redirect()->route('posts.index')
-            ->with('success', "Post \"{$post->title}\" dipindahkan ke tempat sampah.");
-    }
-
-    // ------------------------------------------------------------------
-    // BONUS: soft delete (tempat sampah)
-    // ------------------------------------------------------------------
-
-    public function trash(): View
-    {
-        $posts = Post::onlyTrashed()->latest('deleted_at')->paginate(self::PER_PAGE);
-
-        return view('posts.trash', compact('posts'));
+        return redirect()
+            ->route('posts.index')
+            ->with('success', "Artikel \"{$post->title}\" dipindahkan ke sampah.");
     }
 
     public function restore(Post $post): RedirectResponse
     {
         try {
             $post->restore();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             report($e);
-            return back()->with('error', 'Gagal memulihkan post.');
+
+            return back()->with('error', 'Artikel gagal dipulihkan. Silakan coba lagi.');
         }
 
-        return redirect()->route('posts.trash')
-            ->with('success', "Post \"{$post->title}\" berhasil dipulihkan.");
+        return redirect()
+            ->route('posts.index', ['trashed' => 1])
+            ->with('success', "Artikel \"{$post->title}\" berhasil dipulihkan.");
     }
 
     public function forceDelete(Post $post): RedirectResponse
@@ -147,49 +153,43 @@ class PostController extends Controller
             if ($post->image) {
                 Storage::disk('public')->delete($post->image);
             }
+
             $post->forceDelete();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             report($e);
-            return back()->with('error', 'Gagal menghapus permanen.');
+
+            return back()->with('error', 'Artikel gagal dihapus permanen. Silakan coba lagi.');
         }
 
-        return redirect()->route('posts.trash')
-            ->with('success', 'Post dihapus permanen.');
+        return redirect()
+            ->route('posts.index', ['trashed' => 1])
+            ->with('success', "Artikel \"{$post->title}\" dihapus permanen.");
     }
 
-    // ------------------------------------------------------------------
-    // Validasi
-    // ------------------------------------------------------------------
-
-    private function rules(): array
+    private function validatePost(Request $request): array
     {
-        return [
-            'title'   => ['required', 'string', 'min:5', 'max:150'],
-            'author'  => ['required', 'string', 'min:3', 'max:80'],
-            'content' => ['required', 'string', 'min:20'],
-            'image'   => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
-        ];
-    }
-
-    private function messages(): array
-    {
-        return [
-            'required'   => ':attribute wajib diisi.',
-            'min.string' => ':attribute minimal :min karakter.',
-            'max.string' => ':attribute maksimal :max karakter.',
-            'image'      => ':attribute harus berupa file gambar.',
-            'mimes'      => ':attribute harus berformat jpg, jpeg, png, atau webp.',
-            'max.file'   => 'Ukuran :attribute maksimal :max KB.',
-        ];
-    }
-
-    private function attributes(): array
-    {
-        return [
-            'title'   => 'Judul',
-            'author'  => 'Penulis',
-            'content' => 'Isi tulisan',
-            'image'   => 'Gambar',
-        ];
+        return $request->validate(
+            [
+                'title' => ['required', 'string', 'min:5', 'max:150'],
+                'body' => ['required', 'string', 'min:20'],
+                'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+                'remove_image' => ['nullable', 'boolean'],
+            ],
+            [
+                'required' => ':attribute wajib diisi.',
+                'string' => ':attribute harus berupa teks.',
+                'min.string' => ':attribute minimal :min karakter.',
+                'max.string' => ':attribute maksimal :max karakter.',
+                'image' => ':attribute harus berupa file gambar.',
+                'mimes' => ':attribute harus berformat JPG, PNG, atau WebP.',
+                'max.file' => ':attribute maksimal 2 MB.',
+                'uploaded' => ':attribute gagal diunggah. Pastikan ukurannya tidak lebih dari 2 MB.',
+            ],
+            [
+                'title' => 'Judul',
+                'body' => 'Isi artikel',
+                'image' => 'Gambar sampul',
+            ]
+        );
     }
 }

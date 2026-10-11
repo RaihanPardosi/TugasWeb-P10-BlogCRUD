@@ -3,39 +3,43 @@
 @section('title', $post->title)
 
 @section('content')
-    <div class="page-head">
-        <a href="{{ route('posts.index') }}" class="btn btn--ghost btn--sm">
-            <x-icon name="arrow-left" :size="16" /> Semua Post
-        </a>
-        <div class="actions">
-            <a href="{{ route('posts.edit', $post) }}" class="btn btn--sm">
-                <x-icon name="edit" :size="16" /> Edit
-            </a>
-            <form action="{{ route('posts.destroy', $post) }}" method="POST"
-                  onsubmit="return confirm('Pindahkan post ini ke tempat sampah?')">
-                @csrf
-                @method('DELETE')
-                <button type="submit" class="btn btn--sm btn--danger">
-                    <x-icon name="trash" :size="16" /> Hapus
-                </button>
-            </form>
-        </div>
-    </div>
+    <div class="narrow">
+        <a href="{{ route('posts.index') }}" class="back"><x-icon name="arrow-left" :size="16" /> Kembali ke daftar</a>
 
-    <x-card class="article" :padded="false">
-        @if ($post->image_url)
-            <img class="article__cover" src="{{ $post->image_url }}" alt="{{ $post->title }}">
-        @endif
-        <div class="card__body">
-            <p class="meta">
-                <span class="badge">{{ $post->author }}</span>
-                <span>{{ $post->created_at->translatedFormat('d F Y, H:i') }}</span>
-                @if ($post->updated_at->gt($post->created_at))
-                    <span>diperbarui {{ $post->updated_at->diffForHumans() }}</span>
-                @endif
-            </p>
-            <h1 class="article__title">{{ $post->title }}</h1>
-            <div class="article__content">{!! nl2br(e($post->content)) !!}</div>
-        </div>
-    </x-card>
+        <article class="article">
+            <header class="article__head">
+                <p class="post__meta">
+                    <x-icon name="timer" :size="14" />
+                    {{ $post->published_on }}
+                    @if ($post->updated_at->gt($post->created_at->copy()->addMinute()))
+                        &middot; diperbarui {{ $post->updated_at->locale('id')->diffForHumans() }}
+                    @endif
+                </p>
+                <h1>{{ $post->title }}</h1>
+            </header>
+
+            @if ($post->image_url)
+                <img class="article__cover" src="{{ $post->image_url }}" alt="Gambar sampul {{ $post->title }}">
+            @endif
+
+            <div class="prose">
+                @foreach ($post->paragraphs as $paragraph)
+                    <p>{!! nl2br(e($paragraph)) !!}</p>
+                @endforeach
+            </div>
+
+            <footer class="article__foot">
+                <a href="{{ route('posts.edit', $post) }}" class="btn btn--ghost">
+                    <x-icon name="pencil" :size="16" /> Edit
+                </a>
+                <form method="POST" action="{{ route('posts.destroy', $post) }}" data-confirm="Pindahkan artikel ini ke sampah?">
+                    @csrf
+                    @method('DELETE')
+                    <button type="submit" class="btn btn--ghost btn--danger">
+                        <x-icon name="trash" :size="16" /> Hapus
+                    </button>
+                </form>
+            </footer>
+        </article>
+    </div>
 @endsection
